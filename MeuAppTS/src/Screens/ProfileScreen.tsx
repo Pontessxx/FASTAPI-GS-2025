@@ -1,15 +1,14 @@
-// screens/HomeScreen.js
+// screens/ProfileScreen.js
 import React, { useContext } from 'react';
 import { View, Text, Button, StyleSheet } from 'react-native';
 import { AuthContext } from '@/types';
 
-export default function HomeScreen() {
+export default function ProfileScreen() {
   const { signOut } = useContext(AuthContext);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Home</Text>
-      <Button title="Logout" onPress={signOut} />
+      <Text style={styles.title}>ProfileScreen</Text>
     </View>
   );
 }

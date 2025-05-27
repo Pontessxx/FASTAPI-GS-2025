@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Body
+from fastapi import FastAPI, HTTPException, Depends, Body, Query
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,7 +7,8 @@ from jose import jwt, JWTError
 from sqlalchemy import Column, Integer, String, create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from passlib.context import CryptContext
-from typing import Optional, List
+from typing import Optional, List, Dict
+import random
 
 # --- Configurações JWT ---
 SECRET_KEY = "ChaveSuperSeguraComMaisDe64CaracteresParaJWTFuncionarCorretamenteComHS512"
@@ -24,6 +25,8 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
+# Armazenamento temporário dos códigos (para produção, use uma tabela no banco!)
+reset_tokens: Dict[str, Dict] = {}
 
 # --- Modelo de Usuário ---
 class User(Base):
@@ -157,3 +160,69 @@ def delete_my_user(db: Session = Depends(get_db), current_user: User = Depends(g
     db.delete(current_user)
     db.commit()
     return {"detail": "Usuário deletado com sucesso"}
+
+@app.get("/reset-password/send-code")
+def send_reset_code(
+    email: str = Query(..., description="E-mail do usuário que esqueceu a senha"),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="E-mail não encontrado")
+
+    # Gera um código numérico de 6 dígitos
+    code = f"{random.randint(0, 999_999):06d}"
+    expire = datetime.utcnow() + timedelta(minutes=5)  # expira em 5 minutos
+
+    reset_tokens[email] = {"code": code, "expire": expire}
+
+    # TODO: aqui você dispara o e-mail com o código via SMTP ou serviço de terceiros
+
+    return {"msg": "Código enviado com sucesso", "code": code, "expire": expire.isoformat()}
+
+# 2) Verificar o código recebido
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+
+@app.post("/reset-password/verify-code")
+def verify_reset_code(request: VerifyCodeRequest):
+    data = reset_tokens.get(request.email)
+    if not data or data["code"] != request.code:
+        raise HTTPException(status_code=400, detail="Código inválido")
+
+    if datetime.utcnow() > data["expire"]:
+        reset_tokens.pop(request.email, None)
+        raise HTTPException(status_code=400, detail="Código expirado")
+
+    return {"msg": "Código válido"}
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+@app.put("/reset-password")
+def reset_password(
+    request: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    data = reset_tokens.get(request.email)
+    if not data or data["code"] != request.code:
+        raise HTTPException(status_code=400, detail="Código inválido")
+    if datetime.utcnow() > data["expire"]:
+        reset_tokens.pop(request.email, None)
+        raise HTTPException(status_code=400, detail="Código expirado")
+
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    user.hashed_password = get_password_hash(request.new_password)
+    db.commit()
+    db.refresh(user)
+
+    # Limpa o token após uso
+    reset_tokens.pop(request.email, None)
+
+    return {"msg": "Senha atualizada com sucesso"}

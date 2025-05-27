@@ -35,6 +35,7 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <Text style={styles.title}>Login</Text>
       <TextInput
         placeholder="Email"
         value={email}
@@ -72,4 +73,5 @@ const styles = StyleSheet.create({
   link: { alignItems: 'center', marginVertical: 6 },
   linkText: { color: '#007AFF' },
   error: { color: 'red', marginBottom: 8, textAlign: 'center' },
+  title: { fontSize: 24, marginBottom: 24, textAlign: 'center' },
 });

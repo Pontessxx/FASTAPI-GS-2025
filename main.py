@@ -4,11 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
-from sqlalchemy import Column, Integer, String, create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from sqlalchemy import Column, Integer, String, create_engine, ForeignKey, DateTime
+from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 from passlib.context import CryptContext
 from typing import Optional, List, Dict
 import random
+from datetime import datetime
 
 # --- Configurações JWT ---
 SECRET_KEY = "ChaveSuperSeguraComMaisDe64CaracteresParaJWTFuncionarCorretamenteComHS512"
@@ -34,6 +35,22 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+
+    regions = relationship(
+        "Region",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    
+
+class Region(Base):
+    __tablename__ = "regions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    region = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="regions")
 
 Base.metadata.create_all(bind=engine)
 
@@ -62,6 +79,18 @@ class UserResponse(BaseModel):
     email: str
     class Config:
         orm_mode = True
+
+class RegionCreate(BaseModel):
+    region: str
+
+class RegionResponse(BaseModel):
+    id: int
+    region: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
 
 # --- Dependência DB ---
 def get_db():
@@ -226,3 +255,31 @@ def reset_password(
     reset_tokens.pop(request.email, None)
 
     return {"msg": "Senha atualizada com sucesso"}
+
+
+@app.post("/regions", response_model=RegionResponse)
+def create_region(
+    payload: RegionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    new = Region(user_id=current_user.id, region=payload.region)
+    db.add(new)
+    db.commit()
+    db.refresh(new)
+    return new
+
+@app.get("/regions", response_model=List[RegionResponse])
+def list_regions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return db.query(Region).filter(Region.user_id == current_user.id).order_by(Region.created_at.desc()).all()
+
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint para verificar se a API está online.
+    """
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}

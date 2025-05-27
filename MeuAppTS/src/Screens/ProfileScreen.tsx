@@ -9,6 +9,7 @@ export default function ProfileScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>ProfileScreen</Text>
+      <Button title="Logout" onPress={signOut} />
     </View>
   );
 }

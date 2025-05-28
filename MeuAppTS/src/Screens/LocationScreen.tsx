@@ -7,31 +7,59 @@ import {
   StyleSheet,
   FlatList,
   Text,
+  TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthContext } from '@/types';
 
+interface RegionItem {
+  id: number;
+  raw: string;
+  label: string;
+}
+
 export default function LocationScreen({ navigation }) {
   const [input, setInput] = useState('');
-  const [regionsList, setRegionsList] = useState<string[]>([]);
+  const [regionsList, setRegionsList] = useState<RegionItem[]>([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { signOut } = useContext(AuthContext);
   const API = 'http://192.168.68.65:8000';
 
-  // Carrega as regiões do backend sempre que a tela ganha foco
   const loadRegions = async () => {
+    setLoading(true);
     try {
       const token = await AsyncStorage.getItem('accessToken');
       const resp = await fetch(`${API}/regions`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (resp.status === 401) return signOut();
-      const data: { region: string }[] = await resp.json();
-      setRegionsList(data.map(r => r.region));
+      const data: { id: number; region: string }[] = await resp.json();
+      const enriched = await Promise.all(
+        data.map(async r => {
+          const cepOnly = r.region.replace(/[^0-9]/g, '');
+          if (/^\d{8}$/.test(cepOnly)) {
+            try {
+              const respCep = await fetch(`https://viacep.com.br/ws/${cepOnly}/json/`);
+              const json = await respCep.json();
+              if (!json.erro) {
+                return { id: r.id, raw: r.region, label: `${json.logradouro}, ${json.bairro} - ${json.uf}` };
+              }
+            } catch {
+              // fallback
+            }
+          }
+          return { id: r.id, raw: r.region, label: r.region };
+        })
+      );
+      setRegionsList(enriched);
     } catch (e) {
       console.warn(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -42,28 +70,12 @@ export default function LocationScreen({ navigation }) {
 
   const handleAdd = async () => {
     setError('');
-    let finalRegion = input.trim();
-
-    // Verifica CEP no formato xxxxxxxx ou xxxxx-xxx
-    const cepOnly = finalRegion.replace('-', '');
-    if (/^\d{8}$/.test(cepOnly)) {
-      try {
-        const resp = await fetch(`https://viacep.com.br/ws/${cepOnly}/json/`);
-        const dados = await resp.json();
-        if (dados.erro) throw new Error('CEP não encontrado');
-        finalRegion = `${dados.bairro}, ${dados.localidade} - ${dados.uf}`;
-      } catch (e: any) {
-        setError(e.message);
-        return;
-      }
-    }
-
-    if (!finalRegion) {
-      setError('Informe um bairro, cidade ou CEP válido.');
+    const cepOnly = input.trim().replace('-', '');
+    if (!input.trim()) {
+      setError('Informe um bairro, cidade ou CEP.');
       return;
     }
-
-    // Salva no backend
+    const payload = /^\d{8}$/.test(cepOnly) ? cepOnly : input.trim();
     try {
       const token = await AsyncStorage.getItem('accessToken');
       const resp = await fetch(`${API}/regions`, {
@@ -72,7 +84,7 @@ export default function LocationScreen({ navigation }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ region: finalRegion }),
+        body: JSON.stringify({ region: payload }),
       });
       if (resp.status === 401) return signOut();
       if (!resp.ok) {
@@ -103,16 +115,26 @@ export default function LocationScreen({ navigation }) {
       <Button title="Cadastrar Região" onPress={handleAdd} />
 
       <Text style={styles.listTitle}>Regiões cadastradas:</Text>
-      <FlatList
-        data={regionsList}
-        keyExtractor={(item, idx) => item + idx}
-        renderItem={({ item }) => (
-          <View style={styles.item}>
-            <Text>{item}</Text>
-          </View>
-        )}
-        ListEmptyComponent={<Text style={styles.empty}>Nenhuma região ainda.</Text>}
-      />
+      {loading ? (
+        <ActivityIndicator size="large" style={{ marginTop: 20 }} />
+      ) : (
+        <FlatList
+          data={regionsList}
+          keyExtractor={item => item.id.toString()}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.item}
+              onPress={() => navigation.navigate('TimeInterruption', {
+                regionId: item.id,
+                regionLabel: item.label
+              })}
+            >
+              <Text>{item.label}</Text>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={<Text style={styles.empty}>Nenhuma região ainda.</Text>}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }

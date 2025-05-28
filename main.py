@@ -1,60 +1,69 @@
-from fastapi import FastAPI, HTTPException, Depends, Body, Query
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
-from sqlalchemy import Column, Integer, String, create_engine, ForeignKey, DateTime
+from sqlalchemy import (
+    Column, Integer, String, create_engine, ForeignKey, DateTime as SA_DateTime
+)
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 from passlib.context import CryptContext
 from typing import Optional, List, Dict
 import random
-from datetime import datetime
 
 # --- Configurações JWT ---
 SECRET_KEY = "ChaveSuperSeguraComMaisDe64CaracteresParaJWTFuncionarCorretamenteComHS512"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# uvicorn main:app --host 0.0.0.0 --port 8000  --reload
-
-# --- Segurança OAuth2 ---
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 # --- Setup SQLAlchemy ---
 SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
-# Armazenamento temporário dos códigos (para produção, use uma tabela no banco!)
-reset_tokens: Dict[str, Dict] = {}
 
-# --- Modelo de Usuário ---
+# --- Modelos ---
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-
     regions = relationship(
-        "Region",
-        back_populates="user",
-        cascade="all, delete-orphan"
+        "Region", back_populates="user", cascade="all, delete-orphan"
     )
-    
+    events = relationship(
+        "OutageEvent", back_populates="user", cascade="all, delete-orphan"
+    )
 
 class Region(Base):
     __tablename__ = "regions"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     region = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
+    created_at = Column(SA_DateTime, default=datetime.utcnow)
     user = relationship("User", back_populates="regions")
+
+class OutageEvent(Base):
+    __tablename__ = "outage_events"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    region_id = Column(Integer, ForeignKey("regions.id"), nullable=False)
+    start_time = Column(SA_DateTime, default=datetime.utcnow)
+    estimated_duration = Column(String, nullable=False)
+    actual_duration = Column(String, nullable=True)
+    damages = Column(String, nullable=True)
+    created_at = Column(SA_DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="events")
+    region = relationship("Region")
 
 Base.metadata.create_all(bind=engine)
 
-# --- Hash de senha ---
+# --- Segurança Senha ---
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -78,7 +87,7 @@ class UserResponse(BaseModel):
     id: int
     email: str
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class RegionCreate(BaseModel):
     region: str
@@ -87,10 +96,30 @@ class RegionResponse(BaseModel):
     id: int
     region: str
     created_at: datetime
-
     class Config:
-        orm_mode = True
+        from_attributes = True
 
+class OutageEventCreate(BaseModel):
+    region_id: int
+    estimated_duration: str
+    actual_duration: Optional[str] = None
+    damages: Optional[str] = None
+
+class OutageEventUpdate(BaseModel):
+    estimated_duration: Optional[str] = None
+    actual_duration: Optional[str] = None
+    damages: Optional[str] = None
+
+class OutageEventResponse(BaseModel):
+    id: int
+    region_id: int
+    estimated_duration: str
+    actual_duration: Optional[str]
+    damages: Optional[str]
+    start_time: datetime
+    created_at: datetime
+    class Config:
+        from_attributes = True
 
 # --- Dependência DB ---
 def get_db():
@@ -100,7 +129,7 @@ def get_db():
     finally:
         db.close()
 
-# --- JWT ---
+# --- Autenticação JWT ---
 def authenticate_user(db: Session, email: str, password: str):
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
@@ -113,7 +142,9 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
+def get_current_user(
+    db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)
+) -> User:
     credentials_exception = HTTPException(
         status_code=401,
         detail="Credenciais inválidas",
@@ -126,7 +157,6 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
@@ -134,7 +164,6 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
 
 # --- FastAPI App ---
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -143,8 +172,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Endpoints ---
-
+# --- Endpoints Usuário ---
 @app.post("/create-user", response_model=UserResponse)
 def create_user(request: CreateUserRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == request.email).first():
@@ -166,97 +194,11 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
-@app.get("/users", response_model=List[UserResponse])
-def list_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(User).all()
-
 @app.get("/users/me", response_model=UserResponse)
 def get_my_user(current_user: User = Depends(get_current_user)):
     return current_user
 
-@app.put("/users/me", response_model=UserResponse)
-def update_my_user(request: UpdateUserRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if request.email:
-        current_user.email = request.email
-    if request.password:
-        current_user.hashed_password = get_password_hash(request.password)
-    db.commit()
-    db.refresh(current_user)
-    return current_user
-
-@app.delete("/users/me")
-def delete_my_user(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db.delete(current_user)
-    db.commit()
-    return {"detail": "Usuário deletado com sucesso"}
-
-@app.get("/reset-password/send-code")
-def send_reset_code(
-    email: str = Query(..., description="E-mail do usuário que esqueceu a senha"),
-    db: Session = Depends(get_db)
-):
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="E-mail não encontrado")
-
-    # Gera um código numérico de 6 dígitos
-    code = f"{random.randint(0, 999_999):06d}"
-    expire = datetime.utcnow() + timedelta(minutes=5)  # expira em 5 minutos
-
-    reset_tokens[email] = {"code": code, "expire": expire}
-
-    # TODO: aqui você dispara o e-mail com o código via SMTP ou serviço de terceiros
-
-    return {"msg": "Código enviado com sucesso", "code": code, "expire": expire.isoformat()}
-
-# 2) Verificar o código recebido
-class VerifyCodeRequest(BaseModel):
-    email: str
-    code: str
-
-@app.post("/reset-password/verify-code")
-def verify_reset_code(request: VerifyCodeRequest):
-    data = reset_tokens.get(request.email)
-    if not data or data["code"] != request.code:
-        raise HTTPException(status_code=400, detail="Código inválido")
-
-    if datetime.utcnow() > data["expire"]:
-        reset_tokens.pop(request.email, None)
-        raise HTTPException(status_code=400, detail="Código expirado")
-
-    return {"msg": "Código válido"}
-
-class ResetPasswordRequest(BaseModel):
-    email: str
-    code: str
-    new_password: str
-
-@app.put("/reset-password")
-def reset_password(
-    request: ResetPasswordRequest,
-    db: Session = Depends(get_db)
-):
-    data = reset_tokens.get(request.email)
-    if not data or data["code"] != request.code:
-        raise HTTPException(status_code=400, detail="Código inválido")
-    if datetime.utcnow() > data["expire"]:
-        reset_tokens.pop(request.email, None)
-        raise HTTPException(status_code=400, detail="Código expirado")
-
-    user = db.query(User).filter(User.email == request.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado")
-
-    user.hashed_password = get_password_hash(request.new_password)
-    db.commit()
-    db.refresh(user)
-
-    # Limpa o token após uso
-    reset_tokens.pop(request.email, None)
-
-    return {"msg": "Senha atualizada com sucesso"}
-
-
+# --- Endpoints Regiões ---
 @app.post("/regions", response_model=RegionResponse)
 def create_region(
     payload: RegionCreate,
@@ -274,12 +216,87 @@ def list_regions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(Region).filter(Region.user_id == current_user.id).order_by(Region.created_at.desc()).all()
+    return db.query(Region) \
+        .filter(Region.user_id == current_user.id) \
+        .order_by(Region.created_at.desc()) \
+        .all()
 
+# --- Endpoints Eventos de Falta de Energia ---
+@app.post("/events", response_model=OutageEventResponse)
+def create_event(
+    payload: OutageEventCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    ev = OutageEvent(
+        user_id=current_user.id,
+        region_id=payload.region_id,
+        estimated_duration=payload.estimated_duration,
+        actual_duration=payload.actual_duration,
+        damages=payload.damages
+    )
+    db.add(ev); db.commit(); db.refresh(ev)
+    return ev
 
+@app.get("/events", response_model=List[OutageEventResponse])
+def list_events(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return db.query(OutageEvent) \
+        .filter(OutageEvent.user_id == current_user.id) \
+        .order_by(OutageEvent.created_at.desc()) \
+        .all()
+
+@app.get("/events/{event_id}", response_model=OutageEventResponse)
+def get_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    ev = db.query(OutageEvent).filter_by(id=event_id, user_id=current_user.id).first()
+    if not ev:
+        raise HTTPException(404, "Evento não encontrado")
+    return ev
+
+@app.put("/events/{event_id}", response_model=OutageEventResponse)
+def update_event(
+    event_id: int,
+    payload: OutageEventUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    ev = db.query(OutageEvent).filter_by(id=event_id, user_id=current_user.id).first()
+    if not ev:
+        raise HTTPException(404, "Evento não encontrado")
+    for attr, val in payload.dict(exclude_unset=True).items():
+        setattr(ev, attr, val)
+    db.commit(); db.refresh(ev)
+    return ev
+
+@app.delete("/events/{event_id}")
+def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    ev = db.query(OutageEvent).filter_by(id=event_id, user_id=current_user.id).first()
+    if not ev:
+        raise HTTPException(404, "Evento não encontrado")
+    db.delete(ev); db.commit()
+    return {"detail": "Evento removido com sucesso"}
+
+# --- Endpoints Recomendações ---
+@app.get("/recommendations", response_model=List[str])
+def get_recommendations():
+    return [
+        'Mantenha lanternas e pilhas à mão.',
+        'Estoque água potável.',
+        'Desligue equipamentos sensíveis antes do restabelecimento.',
+        'Siga instruções das autoridades locais.'
+    ]
+
+# --- Health Check ---
 @app.get("/health")
 def health_check():
-    """
-    Health check endpoint para verificar se a API está online.
-    """
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}

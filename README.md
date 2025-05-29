@@ -1,6 +1,6 @@
 # Como funciona o projeto
 
-API em FLASH API, para rodar basta abrir o cmd na pasta raiz e escrever:
+API em [`FLASH API`](https://github.com/Pontessxx/Flash-api-gs-2025-python), para rodar basta abrir o cmd na pasta raiz e escrever:
 ```cmd
     pip install -r requirements.txt
 ```
@@ -20,3 +20,7 @@ Para rodar a api:
     npx expo start
 ```
 
+# TRIO
+Rafael Autieri dos Anjos - rm550885
+Henrique pontes Oliveira - rm98036
+Rafael Carvalho Mattos - rm99874

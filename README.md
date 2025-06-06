@@ -24,3 +24,10 @@ Para rodar a api:
 Rafael Autieri dos Anjos - rm550885
 Henrique pontes Oliveira - rm98036
 Rafael Carvalho Mattos - rm99874
+
+
+# Teste usuario 
+
+Cadastrado
+- teste@email.com : 1234
+

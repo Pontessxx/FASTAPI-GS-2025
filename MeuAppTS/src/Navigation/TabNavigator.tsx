@@ -42,7 +42,7 @@ export default function TabNavigator() {
     >
       <Tab.Screen name="Panorama" component={PanoramaScreen} options={{ title: 'Resumo' }} />
       <Tab.Screen name="Recommendations" component={RecommendationsScreen} options={{ title: 'Dicas' }} />
-      <Tab.Screen name="Location" component={LocationScreen} options={{ title: 'Location' }} />
+      <Tab.Screen name="Location" component={LocationScreen} options={{ title: 'Localização' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Perfil' }} />
     </Tab.Navigator>
   );

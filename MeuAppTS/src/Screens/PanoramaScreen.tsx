@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   StyleSheet,
   RefreshControl,
-  Button,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthContext } from '@/types';
@@ -53,7 +52,7 @@ export default function PanoramaScreen() {
 
   const renderItem = ({ item }) => (
     <View style={styles.item}>
-      <Text style={styles.region}>Região ID: {item.region_id}</Text>
+      <Text style={styles.region}>Região: {item.region_label}</Text>
       <Text>Estimado: {item.estimated_duration}</Text>
       {item.actual_duration ? <Text>Real: {item.actual_duration}</Text> : null}
       {item.damages ? <Text>Prejuízos: {item.damages}</Text> : null}
@@ -66,6 +65,11 @@ export default function PanoramaScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Panorama Geral</Text>
+      <Text style={styles.description}>
+        Este aplicativo permite que você registre episódios de falta de energia em sua região,
+        mesmo quando estiver offline. Cadastre localidades afetadas, informe quanto tempo durou a
+        interrupção, descreva prejuízos e acesse um histórico completo aqui abaixo.
+      </Text>
 
       {loading ? (
         <ActivityIndicator size="large" />
@@ -73,6 +77,10 @@ export default function PanoramaScreen() {
         <Text style={styles.error}>{error}</Text>
       ) : (
         <View style={styles.content}>
+          <Text style={styles.description}>
+            Aqui você vê todos os registros feitos sobre falta de energia. Para adicionar um novo evento, vá até “Localização” e siga o fluxo.
+          </Text>
+
           <Text style={styles.summary}>Total de eventos: {events.length}</Text>
           <FlatList
             data={events}
@@ -92,8 +100,9 @@ export default function PanoramaScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 12 },
+  container: { flex: 1, padding: 20 },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
+  description: { fontSize: 14, color: '#333', marginBottom: 16, lineHeight: 20 },
   content: { flex: 1 },
   summary: { fontSize: 16, marginBottom: 8 },
   item: { padding: 12, borderBottomWidth: 1, borderColor: '#eee' },

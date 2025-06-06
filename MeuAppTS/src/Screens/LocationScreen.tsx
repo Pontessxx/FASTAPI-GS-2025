@@ -140,7 +140,7 @@ export default function LocationScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
+  container: { flex: 1, padding: 50 },
   label: { marginBottom: 4, fontWeight: 'bold' },
   input: {
     borderWidth: 1,
